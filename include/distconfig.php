@@ -398,12 +398,8 @@ $config->useGeshi();
 //
 // Note that extensions are case sensitive.
 
-// }}}
-
 // {{{ RSSFEED ---
-
 // Uncomment this line to hide the RSS feed links across all repositories
-
 // $config->setRssEnabled(false);
 
 // To override the global setting for individual repositories, uncomment and replicate
@@ -435,10 +431,8 @@ $config->useGeshi();
 
 // $config->setRssMaxEntries(50, 'myrep');
 
-// }}}
 
 // {{{ SHOW CHANGED FILES IN LOG ---
-
 // Uncomment this line to show changed files on log.php by default. The normal
 // behavior is to do this only if the "Show changed files" link is clicked. This
 // setting reverses the default action but still allows hiding changed files.
@@ -477,10 +471,6 @@ $config->useGeshi();
 // $config->setBugtraqProperties('bug #%BUGID%', 'issues? (\d+)([, ] *(\d+))*'."\n".'(\d+)', 'http://www.example.com/issues/show_bug.cgi?id=%BUGID%', false);
 // $config->setBugtraqProperties('bug #%BUGID%', 'issues? (\d+)([, ] *(\d+))*'."\n".'(\d+)', 'http://www.example.com/issues/show_bug.cgi?id=%BUGID%', false, 'myrep');
 
-// }}}
-
-// {{{ MISCELLANEOUS ---
-
 // Comment out this if you don't have the right to use it. Be warned that you may need it however!
 set_time_limit(0);
 
@@ -489,7 +479,6 @@ set_time_limit(0);
 // $config->setTempDir('temp');
 
 // Number of spaces to expand tabs to in diff/listing view across all repositories
-
 $config->expandTabsBy(8);
 
 // To override the global setting for individual repositories, uncomment and replicate
@@ -497,5 +486,3 @@ $config->expandTabsBy(8);
 // Use the convention 'groupname.myrep' if your repository is in a group.
 
 // $config->expandTabsBy(3, 'myrep'); // Expand Tabs by 3 for repository 'myrep'
-
-// }}}

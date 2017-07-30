@@ -37,79 +37,82 @@ $config->sortByGroup();
 $projects = $config->getRepositories();
 
 if (count($projects) == 1 && $projects[0]->hasReadAccess('/', true)) {
-	header('Location: '.str_replace('&amp;', '', $config->getURL($projects[0], '', 'dir')));
-	exit;
+    header('Location: ' . str_replace('&amp;', '', $config->getURL($projects[0], '', 'dir')));
+    exit;
 }
 
 $i = 0;
 $parity = 0; // Alternates between every entry, whether it is a group or project
-$groupparity = 0; // The first project (and first of any group) resets this to 0
-$curgroup = null;
-$groupcount = 0;
+$groupParity = 0; // The first project (and first of any group) resets this to 0
+$currentGroup = null;
+$groupCount = 0;
+
 // Create listing of all configured projects (includes groups if they are used).
 foreach ($projects as $project) {
-	if (!$project->hasReadAccess('/', true))
-		continue;
+    if (!$project->hasReadAccess('/', true)) {
+        continue;
+    }
 
-	$listvar = &$listing[$i];
-	// If this is the first project in a group, add an entry for the group.
-	if ($curgroup != $project->group) {
-		$groupcount++;
-		$groupparity = 0;
-		$listvar['notfirstgroup'] = !empty($curgroup);
-		$curgroup = $project->group;
-		$listvar['groupname'] = $curgroup; // Applies until next group is set.
-		$listvar['groupid'] = strtr(base64_encode('grp'.$curgroup), array('+' => '-', '/' => '_', '=' => ''));
+    $listvar = &$listing[$i];
+    // If this is the first project in a group, add an entry for the group.
+    if ($currentGroup != $project->group) {
+        $groupCount++;
+        $groupParity = 0;
+        $listvar['notfirstgroup'] = !empty($currentGroup);
+        $currentGroup = $project->group;
+        $listvar['groupname'] = $currentGroup; // Applies until next group is set.
+        $listvar['groupid'] = strtr(base64_encode('grp' . $currentGroup), array( '+' => '-', '/' => '_', '=' => '' ));
 
-		// setting to null because template.php won't unset them
-		$listvar['projectlink'] = null;
-		$listvar['projectname'] = null;
-		$listvar['projecturl'] = null;
-		$i++; // Causes the subsequent lines to store data in the next array slot.
-		$listvar = &$listing[$i];
-		$listvar['groupid'] = null;
-	}
-	$listvar['clientrooturl'] = $project->clientRootURL;
+        // setting to null because template.php won't unset them
+        $listvar['projectlink'] = null;
+        $listvar['projectname'] = null;
+        $listvar['projecturl'] = null;
+        $i++; // Causes the subsequent lines to store data in the next array slot.
+        $listvar = &$listing[$i];
+        $listvar['groupid'] = null;
+    }
+    $listvar['clientrooturl'] = $project->clientRootURL;
 
-	// Populate variables for latest modification to the current repository
-	if ($config->showLastModInIndex()) {
-		$svnrep = new SVNRepository($project);
-		$log = $svnrep->getLog('/', '', '', true, 1);
-		if (isset($log->entries[0])) {
-			$head = $log->entries[0];
-			$listvar['revision'] = $head->rev;
-			$listvar['date'] = $head->date;
-			$listvar['age'] = datetimeFormatDuration(time() - strtotime($head->date));
-			$listvar['author'] = $head->author;
-		} else {
-			$listvar['revision'] = 0;
-			$listvar['date'] = '';
-			$listvar['age'] = '';
-			$listvar['author'] = '';
-		}
-	}
+    // Populate variables for latest modification to the current repository
+    if ($config->showLastModInIndex()) {
+        $svnrep = new SVNRepository($project);
+        $log = $svnrep->getLog('/', '', '', true, 1);
+        if (isset($log->entries[0])) {
+            $head = $log->entries[0];
+            $listvar['revision'] = $head->rev;
+            $listvar['date'] = $head->date;
+            $listvar['age'] = datetimeFormatDuration(time() - strtotime($head->date));
+            $listvar['author'] = $head->author;
+        } else {
+            $listvar['revision'] = 0;
+            $listvar['date'] = '';
+            $listvar['age'] = '';
+            $listvar['author'] = '';
+        }
+    }
 
-	// Create project (repository) listing
-	$url = str_replace('&amp;', '', $config->getURL($project, '', 'dir'));
-	$name = ($config->flatIndex) ? $project->getDisplayName() : $project->name;
-	$listvar['projectlink'] = '<a href="'.$url.'">'.escape($name).'</a>';
-	$listvar['projectname'] = escape($name);
-	$listvar['projecturl'] = $url;
-	$listvar['rowparity'] = $parity % 2;
-	$parity++;
-	$listvar['groupparity'] = $groupparity % 2;
-	$groupparity++;
-	$listvar['groupname'] = ($curgroup != null) ? $curgroup : '';
-	$i++;
+    // Create project (repository) listing
+    $url = str_replace('&amp;', '', $config->getURL($project, '', 'dir'));
+    $name = ($config->flatIndex) ? $project->getDisplayName() : $project->name;
+    $listvar['projectlink'] = '<a href="' . $url . '">' . escape($name) . '</a>';
+    $listvar['projectname'] = escape($name);
+    $listvar['projecturl'] = $url;
+    $listvar['rowparity'] = $parity % 2;
+    $parity++;
+    $listvar['groupparity'] = $groupParity % 2;
+    $groupParity++;
+    $listvar['groupname'] = ($currentGroup != null) ? $currentGroup : '';
+    $i++;
 }
+
 if (empty($listing) && !empty($projects)) {
-	$vars['error'] = $lang['NOACCESS'];
-	checkSendingAuthHeader();
+    $vars['error'] = $lang['NOACCESS'];
+    checkSendingAuthHeader();
 }
 
 $vars['flatview'] = $config->flatIndex;
 $vars['treeview'] = !$config->flatIndex;
 $vars['opentree'] = $config->openTree;
-$vars['groupcount'] = $groupcount; // Indicates whether any groups were present.
+$vars['groupcount'] = $groupCount; // Indicates whether any groups were present.
 
 renderTemplate('index');

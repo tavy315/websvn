@@ -22,365 +22,348 @@
 //
 // Diff to files
 
-ini_set('include_path', $locwebsvnreal.'/lib/pear'.$config->pathSeparator.ini_get('include_path'));
+ini_set('include_path', $locwebsvnreal . '/lib/pear' . $config->pathSeparator . ini_get('include_path'));
 @include_once 'Text/Diff.php';
 @include_once 'Text/Diff/Renderer.php';
 @include_once 'Text/Diff/Renderer/unified.php';
-include_once 'include/diff_util.php';
+include_once 'ListingHelper.php';
+include_once 'LineDiff.php';
+include_once 'SensibleLineChanges.php';
 
 $arrayBased = false;
 $fileBased = false;
 
-class ListingHelper {
-	var $_listing = array();
-	var $_index = 0;
-	var $_blockStart = false;
+function nextLine(&$obj)
+{
+    global $arrayBased, $fileBased;
 
-	function _add($text1, $lineno1, $class1, $text2, $lineno2, $class2) {
-		$listing = &$this->_listing;
-		$index = &$this->_index;
+    if ($arrayBased) {
+        return array_shift($obj);
+    }
 
-		$listvar = &$listing[$index];
-		$listvar['rev1diffclass'] = $class1;
-		$listvar['rev2diffclass'] = $class2;
+    if ($fileBased) {
+        return fgets($obj);
+    }
 
-		$listvar['rev1line'] = $text1;
-		$listvar['rev2line'] = $text2;
-
-		$listvar['rev1lineno'] = $lineno1;
-		$listvar['rev2lineno'] = $lineno2;
-		$listvar['startblock'] = $this->_blockStart;
-		$this->_blockStart = false;
-		$index++;
-	}
-
-	function addDeletedLine($text, $lineno) {
-		$this->_add($text, $lineno, 'diffdeleted', '&nbsp;', '-', 'diffempty');
-	}
-
-	function addAddedLine($text, $lineno) {
-		$this->_add('&nbsp;', '-', 'diffempty', $text, $lineno, 'diffadded');
-	}
-
-	function addChangedLine($text1, $lineno1, $text2, $lineno2) {
-		$this->_add($text1, $lineno1, 'diffchanged', $text2, $lineno2, 'diffchanged');
-	}
-
-	// note that $text1 do not need to be equal $text2 if $ignoreWhitespace is true
-	function addLine($text1, $lineno1, $text2, $lineno2) {
-		$this->_add($text1, $lineno1, 'diff', $text2, $lineno2, 'diff');
-	}
-
-	function startNewBlock() {
-		$this->_blockStart = true;
-	}
-
-	function getListing() {
-		return $this->_listing;
-	}
+    return '';
 }
 
-function nextLine(&$obj) {
-	global $arrayBased, $fileBased;
-	if ($arrayBased) return array_shift($obj);
-	if ($fileBased) return fgets($obj);
-	return '';
+function endOfFile(&$obj)
+{
+    global $arrayBased, $fileBased;
+
+    if ($arrayBased) {
+        return count($obj) == 0;
+    }
+
+    if ($fileBased) {
+        return feof($obj);
+    }
+
+    return true;
 }
 
-function endOfFile(&$obj) {
-	global $arrayBased, $fileBased;
-	if ($arrayBased) return count($obj) == 0;
-	if ($fileBased) return feof($obj);
-	return true;
+function getWrappedLineFromFile($file, $is_highlighted)
+{
+    $line = fgets($file);
+    if ($line === false) {
+        return false;
+    }
+
+    $line = toOutputEncoding($line);
+    if (!$is_highlighted) {
+        $line = escape($line);
+    }
+
+    if (strip_tags($line) === '') {
+        $line = '&nbsp;';
+    }
+
+    return wrapInCodeTagIfNecessary($line);
 }
 
+function diff_result($all, $highlighted, $newtname, $oldtname, $obj, $ignoreWhitespace)
+{
+    $ofile = fopen($oldtname, 'r');
+    $nfile = fopen($newtname, 'r');
 
-function getWrappedLineFromFile($file, $is_highlighted) {
-	$line = fgets($file);
-	if ($line === false) return false;
-	$line = toOutputEncoding($line);
-	if (!$is_highlighted) {
-		$line = escape($line);
-	}
-	if (strip_tags($line) === '') $line = '&nbsp;';
-	return wrapInCodeTagIfNecessary($line);
+    // Get the first real line
+    $line = nextLine($obj);
+
+    $index = 0;
+    $listingHelper = new ListingHelper();
+
+    $curoline = 1;
+    $curnline = 1;
+
+    $sensibleLineChanges = new SensibleLineChanges(new LineDiff($ignoreWhitespace));
+
+    while (!endOfFile($obj)) {
+        // Get the first line of this range
+        $oline = 0;
+        sscanf($line, '@@ -%d', $oline);
+        $line = substr($line, strpos($line, '+'));
+        $nline = 0;
+        sscanf($line, '+%d', $nline);
+
+        while ($curoline < $oline || $curnline < $nline) {
+            if ($curoline < $oline) {
+                $text1 = getWrappedLineFromFile($ofile, $highlighted);
+                $tmpoline = $curoline;
+                $curoline++;
+            } else {
+                $tmpoline = '?';
+                $text1 = '&nbsp';
+            }
+
+            if ($curnline < $nline) {
+                $text2 = getWrappedLineFromFile($nfile, $highlighted);
+                $tmpnline = $curnline;
+                $curnline++;
+            } else {
+                $tmpnline = '?';
+                $text2 = '&nbsp;';
+            }
+
+            if ($all) {
+                $listingHelper->addLine($text1, $tmpoline, $text2, $tmpnline);
+            }
+        }
+
+        if (!$all && $line !== false) {
+            $listingHelper->startNewBlock();
+        }
+
+        $fin = false;
+        while (!endOfFile($obj) && !$fin) {
+            $line = nextLine($obj);
+            if ($line === false || $line === '' || strncmp($line, '@@', 2) == 0) {
+                $sensibleLineChanges->addChangesToListing($listingHelper, $highlighted);
+                $fin = true;
+            } else {
+                $mod = $line{0};
+                $line = rtrim(substr($line, 1));
+
+                switch ($mod) {
+                    case '-':
+                        $text = getWrappedLineFromFile($ofile, $highlighted);
+                        $sensibleLineChanges->addDeletedLine($line, $text, $curoline);
+                        $curoline++;
+                        break;
+
+                    case '+':
+                        $text = getWrappedLineFromFile($nfile, $highlighted);
+                        $sensibleLineChanges->addAddedLine($line, $text, $curnline);
+                        $curnline++;
+                        break;
+
+                    default:
+                        $sensibleLineChanges->addChangesToListing($listingHelper, $highlighted);
+
+                        $text1 = getWrappedLineFromFile($ofile, $highlighted);
+                        $text2 = getWrappedLineFromFile($nfile, $highlighted);
+
+                        $listingHelper->addLine($text1, $curoline, $text2, $curnline);
+
+                        $curoline++;
+                        $curnline++;
+
+                        break;
+                }
+            }
+
+            if (!$fin) {
+                $index++;
+            }
+        }
+    }
+    $sensibleLineChanges->addChangesToListing($listingHelper, $highlighted);
+
+    // Output the rest of the files
+    if ($all) {
+        while (!feof($ofile) || !feof($nfile)) {
+            $noneof = false;
+
+            $text1 = getWrappedLineFromFile($ofile, $highlighted);
+            if ($text1 !== false) {
+                $tmpoline = $curoline;
+                $curoline++;
+                $noneof = true;
+            } else {
+                $tmpoline = '-';
+                $text1 = '&nbsp;';
+            }
+
+            $text2 = getWrappedLineFromFile($nfile, $highlighted);
+            if ($text2 !== false) {
+                $tmpnline = $curnline;
+                $curnline++;
+                $noneof = true;
+            } else {
+                $tmpnline = '-';
+                $text2 = '&nbsp;';
+            }
+
+            if ($noneof) {
+                $listingHelper->addLine($text1, $tmpoline, $text2, $tmpnline);
+            }
+
+        }
+    }
+
+    fclose($ofile);
+    fclose($nfile);
+
+    return $listingHelper->getListing();
 }
 
-function diff_result($all, $highlighted, $newtname, $oldtname, $obj, $ignoreWhitespace) {
-	$ofile = fopen($oldtname, 'r');
-	$nfile = fopen($newtname, 'r');
+function command_diff($all, $ignoreWhitespace, $highlighted, $newtname, $oldtname, $newhlname, $oldhlname)
+{
+    global $config, $lang, $arrayBased, $fileBased;
 
-	// Get the first real line
-	$line = nextLine($obj);
+    $context = 5;
 
-	$index = 0;
-	$listingHelper = new ListingHelper();
+    if ($all) {
+        // Setting the context to 0 makes diff generate the wrong line numbers!
+        $context = 1;
+    }
 
-	$curoline = 1;
-	$curnline = 1;
+    if ($ignoreWhitespace) {
+        $whitespaceFlag = ' -w';
+    } else {
+        $whitespaceFlag = '';
+    }
 
-	$sensibleLineChanges = new SensibleLineChanges(new LineDiff($ignoreWhitespace));
+    // Open a pipe to the diff command with $context lines of context
 
-	while (!endOfFile($obj)) {
-		// Get the first line of this range
-		$oline = 0;
-		sscanf($line, '@@ -%d', $oline);
-		$line = substr($line, strpos($line, '+'));
-		$nline = 0;
-		sscanf($line, '+%d', $nline);
+    $cmd = quoteCommand($config->diff . $whitespaceFlag . ' -U ' . $context . ' "' . $oldtname . '" "' . $newtname . '"');
 
-		while ($curoline < $oline || $curnline < $nline) {
-			if ($curoline < $oline) {
-				$text1 = getWrappedLineFromFile($ofile, $highlighted);
-				$tmpoline = $curoline;
-				$curoline++;
-			} else {
-				$tmpoline = '?';
-				$text1 = '&nbsp';
-			}
+    $descriptorspec = array( 0 => array( 'pipe', 'r' ), 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) );
 
-			if ($curnline < $nline) {
-				$text2 = getWrappedLineFromFile($nfile, $highlighted);
-				$tmpnline = $curnline;
-				$curnline++;
-			} else {
-				$tmpnline = '?';
-				$text2 = '&nbsp;';
-			}
+    $resource = proc_open($cmd, $descriptorspec, $pipes);
+    $error = '';
 
-			if ($all) {
-				$listingHelper->addLine($text1, $tmpoline, $text2, $tmpnline);
-			}
-		}
+    if (is_resource($resource)) {
+        // We don't need to write
+        fclose($pipes[0]);
 
-		if (!$all && $line !== false) {
-			$listingHelper->startNewBlock();
-		}
+        $diff = $pipes[1];
 
-		$fin = false;
-		while (!endOfFile($obj) && !$fin) {
-			$line = nextLine($obj);
-			if ($line === false || $line === '' || strncmp($line, '@@', 2) == 0) {
-				$sensibleLineChanges->addChangesToListing($listingHelper, $highlighted);
-				$fin = true;
-			} else {
-				$mod = $line{0};
-				$line = rtrim(substr($line, 1));
+        // Ignore the 3 header lines
+        $line = fgets($diff);
+        $line = fgets($diff);
 
-				switch ($mod) {
-					case '-':
-						$text = getWrappedLineFromFile($ofile, $highlighted);
-						$sensibleLineChanges->addDeletedLine($line, $text, $curoline);
-						$curoline++;
-						break;
+        $arrayBased = false;
+        $fileBased = true;
 
-					case '+':
-						$text = getWrappedLineFromFile($nfile, $highlighted);
-						$sensibleLineChanges->addAddedLine($line, $text, $curnline);
-						$curnline++;
-						break;
+        if ($highlighted) {
+            $listing = diff_result($all, $highlighted, $newhlname, $oldhlname, $diff, $ignoreWhitespace);
+        } else {
+            $listing = diff_result($all, $highlighted, $newtname, $oldtname, $diff, $ignoreWhitespace);
+        }
 
-					default:
-						$sensibleLineChanges->addChangesToListing($listingHelper, $highlighted);
+        fclose($pipes[1]);
 
-						$text1 = getWrappedLineFromFile($ofile, $highlighted);
-						$text2 = getWrappedLineFromFile($nfile, $highlighted);
+        while (!feof($pipes[2])) {
+            $error .= fgets($pipes[2]);
+        }
 
-						$listingHelper->addLine($text1, $curoline, $text2, $curnline);
+        $error = toOutputEncoding(trim($error));
 
-						$curoline++;
-						$curnline++;
+        if (!empty($error)) {
+            $error = '<p>' . $lang['BADCMD'] . ': <code>' . $cmd . '</code></p><p>' . nl2br($error) . '</p>';
+        }
 
-						break;
-				}
-			}
+        fclose($pipes[2]);
 
-			if (!$fin) {
-				$index++;
-			}
-		}
-	}
-	$sensibleLineChanges->addChangesToListing($listingHelper, $highlighted);
+        proc_close($resource);
 
-	// Output the rest of the files
-	if ($all) {
-		while (!feof($ofile) || !feof($nfile)) {
-			$noneof = false;
+    } else {
+        $error = '<p>' . $lang['BADCMD'] . ': <code>' . $cmd . '</code></p>';
+    }
 
-			$text1 = getWrappedLineFromFile($ofile, $highlighted);
-			if ($text1 !== false) {
-				$tmpoline = $curoline;
-				$curoline++;
-				$noneof = true;
-			} else {
-				$tmpoline = '-';
-				$text1 = '&nbsp;';
-			}
+    if (!empty($error)) {
+        echo $error;
 
+        if (is_resource($resource)) {
+            fclose($pipes[0]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
 
-			$text2 = getWrappedLineFromFile($nfile, $highlighted);
-			if ($text2 !== false) {
-				$tmpnline = $curnline;
-				$curnline++;
-				$noneof = true;
-			} else {
-				$tmpnline = '-';
-				$text2 = '&nbsp;';
-			}
+            proc_close($resource);
+        }
+        exit;
+    }
 
-			if ($noneof) {
-				$listingHelper->addLine($text1, $tmpoline, $text2, $tmpnline);
-			}
-
-		}
-	}
-
-	fclose($ofile);
-	fclose($nfile);
-
-	return $listingHelper->getListing();
+    return $listing;
 }
 
-function command_diff($all, $ignoreWhitespace, $highlighted, $newtname, $oldtname, $newhlname, $oldhlname) {
-	global $config, $lang, $arrayBased, $fileBased;
+function inline_diff($all, $ignoreWhitespace, $highlighted, $newtname, $oldtname, $newhlname, $oldhlname)
+{
+    global $arrayBased, $fileBased;
 
-	$context = 5;
+    $context = 5;
+    if ($all) {
+        // Setting the context to 0 makes diff generate the wrong line numbers!
+        $context = 1;
+    }
 
-	if ($all) {
-		// Setting the context to 0 makes diff generate the wrong line numbers!
-		$context = 1;
-	}
+    // modify error reporting level to suppress deprecated/strict warning "Assigning the return value of new by reference"
+    $bckLevel = error_reporting();
+    $removeLevel = 0;
+    if (version_compare(PHP_VERSION, '5.3.0alpha') !== -1) {
+        $removeLevel = E_DEPRECATED;
+    } else {
+        if (version_compare(PHP_VERSION, '5.0.0') !== -1) {
+            $removeLevel = E_STRICT;
+        }
+    }
+    $modLevel = $bckLevel & (~$removeLevel);
+    error_reporting($modLevel);
 
-	if ($ignoreWhitespace) {
-		$whitespaceFlag = ' -w';
-	} else {
-		$whitespaceFlag = '';
-	}
+    // Create the diff class
+    $fromLines = file($oldtname);
+    $toLines = file($newtname);
+    if (!$ignoreWhitespace) {
+        $diff = @new Text_Diff('auto', array( $fromLines, $toLines ));
+    } else {
+        $whitespaces = array( ' ', "\t", "\n", "\r" );
+        $mappedFromLines = array();
+        foreach ($fromLines as $k => $line) {
+            $line = rtrim($line, "\n\r");
+            $fromLines[$k] = $line;
+            $mappedFromLines[] = str_replace($whitespaces, array(), $line);
+        }
+        $mappedToLines = array();
+        foreach ($toLines as $k => $line) {
+            $line = rtrim($line, "\n\r");
+            $toLines[$k] = $line;
+            $mappedToLines[] = str_replace($whitespaces, array(), $line);
+        }
+        $diff = @new Text_MappedDiff($fromLines, $toLines, $mappedFromLines, $mappedToLines);
+    }
+    $renderer = new Text_Diff_Renderer_unified(array( 'leading_context_lines' => $context, 'trailing_context_lines' => $context ));
+    $rendered = explode("\n", $renderer->render($diff));
 
-	// Open a pipe to the diff command with $context lines of context
+    // restore previous error reporting level
+    error_reporting($bckLevel);
 
-	$cmd = quoteCommand($config->diff.$whitespaceFlag.' -U '.$context.' "'.$oldtname.'" "'.$newtname.'"');
+    $arrayBased = true;
+    $fileBased = false;
+    if ($highlighted) {
+        $listing = diff_result($all, $highlighted, $newhlname, $oldhlname, $rendered, $ignoreWhitespace);
+    } else {
+        $listing = diff_result($all, $highlighted, $newtname, $oldtname, $rendered, $ignoreWhitespace);
+    }
 
-	$descriptorspec = array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
-
-	$resource = proc_open($cmd, $descriptorspec, $pipes);
-	$error = '';
-
-	if (is_resource($resource)) {
-		// We don't need to write
-		fclose($pipes[0]);
-
-		$diff = $pipes[1];
-
-		// Ignore the 3 header lines
-		$line = fgets($diff);
-		$line = fgets($diff);
-
-		$arrayBased = false;
-		$fileBased = true;
-
-		if ($highlighted) {
-			$listing = diff_result($all, $highlighted, $newhlname, $oldhlname, $diff, $ignoreWhitespace);
-		} else {
-			$listing = diff_result($all, $highlighted, $newtname, $oldtname, $diff, $ignoreWhitespace);
-		}
-
-		fclose($pipes[1]);
-
-		while (!feof($pipes[2])) {
-			$error .= fgets($pipes[2]);
-		}
-
-		$error = toOutputEncoding(trim($error));
-
-		if (!empty($error)) $error = '<p>'.$lang['BADCMD'].': <code>'.$cmd.'</code></p><p>'.nl2br($error).'</p>';
-
-		fclose($pipes[2]);
-
-		proc_close($resource);
-
-	} else {
-		$error = '<p>'.$lang['BADCMD'].': <code>'.$cmd.'</code></p>';
-	}
-
-	if (!empty($error)) {
-		echo $error;
-
-		if (is_resource($resource)) {
-			fclose($pipes[0]);
-			fclose($pipes[1]);
-			fclose($pipes[2]);
-
-			proc_close($resource);
-		}
-		exit;
-	}
-
-	return $listing;
+    return $listing;
 }
 
-function inline_diff($all, $ignoreWhitespace, $highlighted, $newtname, $oldtname, $newhlname, $oldhlname) {
-	global $arrayBased, $fileBased;
-
-	$context = 5;
-	if ($all) {
-		// Setting the context to 0 makes diff generate the wrong line numbers!
-		$context = 1;
-	}
-
-	// modify error reporting level to suppress deprecated/strict warning "Assigning the return value of new by reference"
-	$bckLevel = error_reporting();
-	$removeLevel = 0;
-	if (version_compare(PHP_VERSION, '5.3.0alpha') !== -1) {
-		$removeLevel = E_DEPRECATED;
-	} else if (version_compare(PHP_VERSION, '5.0.0') !== -1) {
-		$removeLevel = E_STRICT;
-	}
-	$modLevel = $bckLevel & (~$removeLevel);
-	error_reporting($modLevel);
-
-	// Create the diff class
-	$fromLines = file($oldtname);
-	$toLines = file($newtname);
-	if (!$ignoreWhitespace) {
-		$diff = @new Text_Diff('auto', array($fromLines, $toLines));
-	} else {
-		$whitespaces = array(' ', "\t", "\n", "\r");
-		$mappedFromLines = array();
-		foreach ($fromLines as $k => $line) {
-			$line = rtrim($line, "\n\r");
-			$fromLines[$k] = $line;
-			$mappedFromLines[] = str_replace($whitespaces, array(), $line);
-		}
-		$mappedToLines = array();
-		foreach ($toLines as $k => $line) {
-			$line = rtrim($line, "\n\r");
-			$toLines[$k] = $line;
-			$mappedToLines[] = str_replace($whitespaces, array(), $line);
-		}
-		$diff = @new Text_MappedDiff($fromLines, $toLines, $mappedFromLines, $mappedToLines);
-	}
-	$renderer = new Text_Diff_Renderer_unified(array('leading_context_lines' => $context, 'trailing_context_lines' => $context));
-	$rendered = explode("\n", $renderer->render($diff));
-
-	// restore previous error reporting level
-	error_reporting($bckLevel);
-
-	$arrayBased = true;
-	$fileBased = false;
-	if ($highlighted) {
-		$listing = diff_result($all, $highlighted, $newhlname, $oldhlname, $rendered, $ignoreWhitespace);
-	} else {
-		$listing = diff_result($all, $highlighted, $newtname, $oldtname, $rendered, $ignoreWhitespace);
-	}
-
-	return $listing;
-}
-
-function do_diff($all, $ignoreWhitespace, $highlighted, $newtname, $oldtname, $newhlname, $oldhlname) {
-	if (class_exists('Text_Diff')) {
-		return inline_diff($all, $ignoreWhitespace, $highlighted, $newtname, $oldtname, $newhlname, $oldhlname);
-	} else {
-		return command_diff($all, $ignoreWhitespace, $highlighted, $newtname, $oldtname, $newhlname, $oldhlname);
-	}
+function do_diff($all, $ignoreWhitespace, $highlighted, $newtname, $oldtname, $newhlname, $oldhlname)
+{
+    if (class_exists('Text_Diff')) {
+        return inline_diff($all, $ignoreWhitespace, $highlighted, $newtname, $oldtname, $newhlname, $oldhlname);
+    } else {
+        return command_diff($all, $ignoreWhitespace, $highlighted, $newtname, $oldtname, $newhlname, $oldhlname);
+    }
 }

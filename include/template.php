@@ -36,256 +36,276 @@ $ignorelevel = 0;
 // parseCommand
 //
 // Parse a special command
+function parseCommand($line, $vars, $handle)
+{
+    global $ignore, $ignorestack, $ignorelevel, $config, $listing, $vars;
 
-function parseCommand($line, $vars, $handle) {
-	global $ignore, $ignorestack, $ignorelevel, $config, $listing, $vars;
+    // process content of included file
+    if (strncmp(trim($line), '[websvn-include:', 16) == 0) {
+        if (!$ignore) {
+            $line = trim($line);
+            $file = substr($line, 16, -1);
+            parseTemplate($file);
+        }
 
-	// process content of included file
-	if (strncmp(trim($line), '[websvn-include:', 16) == 0) {
-		if (!$ignore) {
-			$line = trim($line);
-			$file = substr($line, 16, -1);
-			parseTemplate($file);
-		}
-		return true;
-	}
+        return true;
+    }
 
+    // Check for test conditions
+    if (strncmp(trim($line), '[websvn-test:', 13) == 0) {
+        if (!$ignore) {
+            $line = trim($line);
+            $var = substr($line, 13, -1);
+            $neg = ($var{0} == '!');
+            if ($neg) {
+                $var = substr($var, 1);
+            }
+            if (empty($vars[$var]) ^ $neg) {
+                array_push($ignorestack, $ignore);
+                $ignore = true;
+            }
+        } else {
+            $ignorelevel++;
+        }
 
-	// Check for test conditions
-	if (strncmp(trim($line), '[websvn-test:', 13) == 0) {
-		if (!$ignore) {
-			$line = trim($line);
-			$var = substr($line, 13, -1);
-			$neg = ($var{0} == '!');
-			if ($neg) $var = substr($var, 1);
-			if (empty($vars[$var]) ^ $neg) {
-				array_push($ignorestack, $ignore);
-				$ignore = true;
-			}
-		} else {
-			$ignorelevel++;
-		}
-		return true;
-	}
+        return true;
+    }
 
-	if (strncmp(trim($line), '[websvn-else]', 13) == 0) {
-		if ($ignorelevel == 0) {
-			$ignore = !$ignore;
-		}
-		return true;
-	}
+    if (strncmp(trim($line), '[websvn-else]', 13) == 0) {
+        if ($ignorelevel == 0) {
+            $ignore = !$ignore;
+        }
 
-	if (strncmp(trim($line), '[websvn-endtest]', 16) == 0) {
-		if ($ignorelevel > 0) {
-			$ignorelevel--;
-		} else {
-			$ignore = array_pop($ignorestack);
-		}
-		return true;
-	}
+        return true;
+    }
 
-	if (strncmp(trim($line), '[websvn-getlisting]', 19) == 0) {
-		global $svnrep, $path, $rev, $peg;
+    if (strncmp(trim($line), '[websvn-endtest]', 16) == 0) {
+        if ($ignorelevel > 0) {
+            $ignorelevel--;
+        } else {
+            $ignore = array_pop($ignorestack);
+        }
 
-		if (!$ignore) {
-			$svnrep->listFileContents($path, $rev, $peg);
-		}
-		return true;
-	}
+        return true;
+    }
 
-	if (strncmp(trim($line), '[websvn-defineicons]', 19) == 0) {
-		global $icons;
+    if (strncmp(trim($line), '[websvn-getlisting]', 19) == 0) {
+        global $svnrep, $path, $rev, $peg;
 
-		if (!isset($icons)) {
-			$icons = array();
-		}
+        if (!$ignore) {
+            $svnrep->listFileContents($path, $rev, $peg);
+        }
 
-		// Read all the lines until we reach the end of the definition, storing
-		// each one...
+        return true;
+    }
 
-		if (!$ignore) {
-			while (!feof($handle)) {
-				$line = trim(fgets($handle));
-				if (strncmp($line, '[websvn-enddefineicons]', 22) == 0) {
-					return true;
-				}
-				$eqsign = strpos($line, '=');
-				$match = substr($line, 0, $eqsign);
-				$def = substr($line, $eqsign + 1);
-				$icons[$match] = $def;
-			}
-		}
-		return true;
-	}
+    if (strncmp(trim($line), '[websvn-defineicons]', 19) == 0) {
+        global $icons;
 
-	if (strncmp(trim($line), '[websvn-icon]', 13) == 0) {
-		global $icons, $vars;
+        if (!isset($icons)) {
+            $icons = array();
+        }
 
-		if (!$ignore) {
-			// The current filetype should be defined my $vars['filetype']
-			if (!empty($icons[$vars['filetype']])) {
-				echo parseTags($icons[$vars['filetype']], $vars);
-			} else if (!empty($icons['*'])) {
-				echo parseTags($icons['*'], $vars);
-			}
-		}
+        // Read all the lines until we reach the end of the definition, storing each one...
+        if (!$ignore) {
+            while (!feof($handle)) {
+                $line = trim(fgets($handle));
+                if (strncmp($line, '[websvn-enddefineicons]', 22) == 0) {
+                    return true;
+                }
+                $eqsign = strpos($line, '=');
+                $match = substr($line, 0, $eqsign);
+                $def = substr($line, $eqsign + 1);
+                $icons[$match] = $def;
+            }
+        }
 
-		return true;
-	}
+        return true;
+    }
 
-	if (strncmp(trim($line), '[websvn-treenode]', 17) == 0) {
-		global $icons, $vars;
+    if (strncmp(trim($line), '[websvn-icon]', 13) == 0) {
+        global $icons, $vars;
 
-		if (!$ignore) {
-			if ((!empty($icons['i-node'])) && (!empty($icons['t-node'])) && (!empty($icons['l-node']))) {
-				for ($n = 1; $n < $vars['level']; $n++) {
-					if ($vars['last_i_node'][$n]) {
-						echo parseTags($icons['e-node'], $vars);
-					} else {
-						echo parseTags($icons['i-node'], $vars);
-					}
-				}
+        if (!$ignore) {
+            // The current filetype should be defined my $vars['filetype']
+            if (!empty($icons[$vars['filetype']])) {
+                echo parseTags($icons[$vars['filetype']], $vars);
+            } else {
+                if (!empty($icons['*'])) {
+                    echo parseTags($icons['*'], $vars);
+                }
+            }
+        }
 
-				if ($vars['level'] != 0) {
-					if ($vars['node'] == 0) {
-						echo parseTags($icons['t-node'], $vars);
-					} else {
-						echo parseTags($icons['l-node'], $vars);
-						$vars['last_i_node'][$vars['level']] = true;
-					}
-				}
-			}
-		}
-		return true;
-	}
-	return false;
+        return true;
+    }
+
+    if (strncmp(trim($line), '[websvn-treenode]', 17) == 0) {
+        global $icons, $vars;
+
+        if (!$ignore) {
+            if ((!empty($icons['i-node'])) && (!empty($icons['t-node'])) && (!empty($icons['l-node']))) {
+                for ($n = 1; $n < $vars['level']; $n++) {
+                    if ($vars['last_i_node'][$n]) {
+                        echo parseTags($icons['e-node'], $vars);
+                    } else {
+                        echo parseTags($icons['i-node'], $vars);
+                    }
+                }
+
+                if ($vars['level'] != 0) {
+                    if ($vars['node'] == 0) {
+                        echo parseTags($icons['t-node'], $vars);
+                    } else {
+                        echo parseTags($icons['l-node'], $vars);
+                        $vars['last_i_node'][$vars['level']] = true;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    return false;
 }
 
 // parseTemplate
 //
 // Parse the given template, replacing the variables with the values passed
+function parseTemplate($file)
+{
+    global $ignore, $rep, $config, $vars, $listing;
 
-function parseTemplate($file) {
-	global $ignore, $rep, $config, $vars, $listing;
+    $template = (($rep) ? $rep->getTemplatePath() : $config->getTemplatePath()) . $file;
+    if (!is_file($template)) {
+        print 'No template file found (' . $template . ')';
+        exit;
+    }
 
-	$template = (($rep) ? $rep->getTemplatePath() : $config->getTemplatePath()).$file;
-	if (!is_file($template)) {
-		print 'No template file found ('.$template.')';
-		exit;
-	}
+    $handle = fopen($template, 'r');
+    $inListing = false;
+    $ignore = false;
+    $listLines = array();
 
-	$handle = fopen($template, 'r');
-	$inListing = false;
-	$ignore = false;
-	$listLines = array();
+    while (!feof($handle)) {
+        $line = fgets($handle);
+        // Check for the end of the file list
+        if ($inListing) {
+            if (strcmp(trim($line), '[websvn-endlisting]') == 0) {
+                $inListing = false;
 
-	while (!feof($handle)) {
-		$line = fgets($handle);
-		// Check for the end of the file list
-		if ($inListing) {
-			if (strcmp(trim($line), '[websvn-endlisting]') == 0) {
-				$inListing = false;
-
-				// For each item in the list
-				foreach ($listing as $listvars) {
-					// Copy the value for this list item into the $vars array
-					foreach ($listvars as $id => $value) {
-						$vars[$id] = $value;
-					}
-					// Output the list item
-					foreach ($listLines as $line) {
-						if (!parseCommand($line, $vars, $handle) && !$ignore) {
-							print parseTags($line, $vars);
-						}
-					}
-				}
-			} else if ($ignore == false) {
-				$listLines[] = $line;
-			}
-		} else if (parseCommand($line, $vars, $handle)) {
-			continue;
-		} else {
-			// Check for the start of the file list
-			if (strncmp(trim($line), '[websvn-startlisting]', 21) == 0) {
-				$inListing = true;
-			} else {
-				if ($ignore == false) {
-					print parseTags($line, $vars);
-				}
-			}
-		}
-	}
-	fclose($handle);
+                // For each item in the list
+                foreach ($listing as $listvars) {
+                    // Copy the value for this list item into the $vars array
+                    foreach ($listvars as $id => $value) {
+                        $vars[$id] = $value;
+                    }
+                    // Output the list item
+                    foreach ($listLines as $line) {
+                        if (!parseCommand($line, $vars, $handle) && !$ignore) {
+                            print parseTags($line, $vars);
+                        }
+                    }
+                }
+            } else {
+                if ($ignore == false) {
+                    $listLines[] = $line;
+                }
+            }
+        } else {
+            if (parseCommand($line, $vars, $handle)) {
+                continue;
+            } else {
+                // Check for the start of the file list
+                if (strncmp(trim($line), '[websvn-startlisting]', 21) == 0) {
+                    $inListing = true;
+                } else {
+                    if ($ignore == false) {
+                        print parseTags($line, $vars);
+                    }
+                }
+            }
+        }
+    }
+    fclose($handle);
 }
 
 // parseTags
 //
-// Replace all occurences of [websvn:varname] with the give variable
+// Replace all occurrences of [websvn:varname] with the given variable
 
-function parseTags($line, $vars) {
-	global $lang;
+function parseTags($line, $vars)
+{
+    global $lang;
 
-	// Replace the language strings
-	while (preg_match('|\[lang:([a-zA-Z0-9_]+)\]|', $line, $matches)) {
-		// Make sure that the variable exists
-		if (!isset($lang[$matches[1]])) {
-			$lang[$matches[1]] = '?${matches[1]}?';
-		}
-		$line = str_replace($matches[0], $lang[$matches[1]], $line);
-	}
+    // Replace the language strings
+    while (preg_match('|\[lang:([a-zA-Z0-9_]+)\]|', $line, $matches)) {
+        // Make sure that the variable exists
+        if (!isset($lang[$matches[1]])) {
+            $lang[$matches[1]] = '?${matches[1]}?';
+        }
+        $line = str_replace($matches[0], $lang[$matches[1]], $line);
+    }
 
-	$l = '';
-	// Replace the websvn variables
-	while (preg_match('|\[websvn:([a-zA-Z0-9_]+)\]|', $line, $matches)) {
-		// Find beginning
-		$p = strpos($line, $matches[0]);
+    $l = '';
+    // Replace the websvn variables
+    while (preg_match('|\[websvn:([a-zA-Z0-9_]+)\]|', $line, $matches)) {
+        // Find beginning
+        $p = strpos($line, $matches[0]);
 
-		// add everything up to beginning
-		if ($p > 0) {
-			$l .= substr($line, 0, $p);
-		}
+        // add everything up to beginning
+        if ($p > 0) {
+            $l .= substr($line, 0, $p);
+        }
 
-		// Replace variable (special token, if not exists)
-		$l .= isset($vars[$matches[1]]) ? $vars[$matches[1]]: ('?'.$matches[1].'?');
+        // Replace variable (special token, if not exists)
+        $l .= isset($vars[$matches[1]]) ? $vars[$matches[1]] : ('?' . $matches[1] . '?');
 
-		// Remove allready processed part of line
-		$line = substr($line, $p + strlen($matches[0]));
-	}
+        // Remove allready processed part of line
+        $line = substr($line, $p + strlen($matches[0]));
+    }
 
-	// Rebuild line, add remaining part of line
-	$line = $l.$line;
+    // Rebuild line, add remaining part of line
+    $line = $l . $line;
 
-	return $line;
+    return $line;
 }
-
 
 // renderTemplate
 //
 // Renders the templates for the given view
 
-function renderTemplate($view) {
-	global $config, $rep, $vars, $listing, $lang, $locwebsvnhttp;
+function renderTemplate($view)
+{
+    global $config, $rep, $vars, $listing, $lang, $locwebsvnhttp;
 
-	// Set the view in the templates variables
-	$vars['template'] = $view;
+    // Set the view in the templates variables
+    $vars['template'] = $view;
 
-	// Check if we are using a PHP powered template or the standard one
-	$path = !empty($rep) ? $rep->getTemplatePath() : $config->getTemplatePath();
-	$path = $path . 'template.php';
-	if (is_readable($path)) {
-		$vars['templateentrypoint'] = $path;
-		executePlainPhpTemplate($vars);
-	} else {
-		parseTemplate('header.tmpl');
-		flush(); // http://developer.yahoo.com/performance/rules.html#flush
-		parseTemplate($view . '.tmpl');
-		if ($view === 'directory' || $view === 'log') {
-			print '<script type="text/javascript" src="'.$locwebsvnhttp.'/javascript/compare-checkboxes.js"></script>';
-		}
-		parseTemplate('footer.tmpl');
-	}
+    // Check if we are using a PHP powered template or the standard one
+    $path = !empty($rep) ? $rep->getTemplatePath() : $config->getTemplatePath();
+    $path = $path . 'template.php';
+    if (is_readable($path)) {
+        $vars['templateentrypoint'] = $path;
+
+        executePlainPhpTemplate($vars);
+    } else {
+        parseTemplate('header.tmpl');
+
+        flush(); // http://developer.yahoo.com/performance/rules.html#flush
+
+        parseTemplate($view . '.tmpl');
+
+        if ($view === 'directory' || $view === 'log') {
+            print '<script type="text/javascript" src="' . $locwebsvnhttp . '/javascript/compare-checkboxes.js"></script>';
+        }
+
+        parseTemplate('footer.tmpl');
+    }
 }
 
-function executePlainPhpTemplate($vars) {
-	require_once $vars['templateentrypoint'];
+function executePlainPhpTemplate($vars)
+{
+    require_once $vars['templateentrypoint'];
 }
